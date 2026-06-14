@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../services/aqua_firebase_service.dart';
 import '../services/gemini_chat_service.dart';
@@ -105,29 +106,32 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     setState(() {
       _isSending = true;
       _chatError = null;
+      _messages = [..._messages, userMessage];
     });
     _scrollToBottom();
 
     try {
-      await _firebaseService.saveChatMessage(userMessage);
+      unawaited(_saveMessageQuietly(userMessage));
       final pondData = await _firebaseService.readRealtimeDataOnce();
       final reply = await _geminiService.generateReply(
         recentMessages: historyForGemini,
         pondData: pondData,
       );
-      await _firebaseService.saveChatMessage(AquaChatMessage.assistant(reply));
+      final assistantMessage = AquaChatMessage.assistant(reply);
+      if (mounted) {
+        setState(() {
+          _messages = [..._messages, assistantMessage];
+        });
+      }
+      unawaited(_saveMessageQuietly(assistantMessage));
     } catch (error) {
       final errorMessage = AquaChatMessage.assistant(_friendlyError(error));
-      try {
-        await _firebaseService.saveChatMessage(errorMessage);
-      } catch (_) {
-        if (!mounted) {
-          return;
-        }
+      if (mounted) {
         setState(() {
           _messages = [..._messages, errorMessage];
         });
       }
+      unawaited(_saveMessageQuietly(errorMessage));
     } finally {
       if (mounted) {
         setState(() {
@@ -135,6 +139,72 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         });
         _scrollToBottom();
       }
+    }
+  }
+
+  Future<void> _saveMessageQuietly(AquaChatMessage message) async {
+    try {
+      await _firebaseService.saveChatMessage(message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _chatError =
+            'Chat vẫn dùng được, nhưng Firebase chưa lưu được lịch sử.';
+      });
+    }
+  }
+
+  Future<void> _confirmAndClearChat() async {
+    if (_isSending || _isLoadingMessages) {
+      return;
+    }
+
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Xóa toàn bộ chat?'),
+          content: const Text(
+            'Lịch sử chat trên Firebase sẽ bị xóa và không thể khôi phục.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Hủy'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('Xóa'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldClear != true) {
+      return;
+    }
+
+    try {
+      await _firebaseService.clearChatMessages();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _chatError = null;
+        _messages = _welcomeMessages;
+      });
+      _scrollToBottom();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _chatError = 'Chưa xóa được lịch sử chat trên Firebase.';
+      });
     }
   }
 
@@ -295,6 +365,16 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               ],
             ),
           ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Xóa toàn bộ chat',
+            onPressed: _isSending || _isLoadingMessages
+                ? null
+                : _confirmAndClearChat,
+            icon: const Icon(Icons.delete_outline_rounded),
+            color: AppTheme.textMuted,
+            disabledColor: AppTheme.textMuted.withValues(alpha: 0.38),
+          ),
         ],
       ),
     );
@@ -359,18 +439,22 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   ),
                 ],
               ),
-              child: Text(
-                message.text,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: message.isUser
-                      ? FontWeight.w500
-                      : FontWeight.w400,
-                  color: message.isUser ? Colors.white : AppTheme.textDark,
-                  height: 1.5,
-                  letterSpacing: 0.2,
-                ),
-              ),
+              child: message.isUser
+                  ? Text(
+                      message.text,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                        height: 1.5,
+                        letterSpacing: 0.2,
+                      ),
+                    )
+                  : MarkdownBody(
+                      data: message.text,
+                      selectable: false,
+                      styleSheet: _markdownStyleSheet(context),
+                    ),
             ),
           ),
           if (message.isUser) ...[
@@ -397,6 +481,25 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  MarkdownStyleSheet _markdownStyleSheet(BuildContext context) {
+    const base = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w400,
+      color: AppTheme.textDark,
+      height: 1.5,
+      letterSpacing: 0.2,
+    );
+
+    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      p: base,
+      strong: base.copyWith(fontWeight: FontWeight.w800),
+      h1: base.copyWith(fontSize: 17, fontWeight: FontWeight.w800),
+      h2: base.copyWith(fontSize: 16, fontWeight: FontWeight.w800),
+      h3: base.copyWith(fontSize: 15, fontWeight: FontWeight.w800),
+      listBullet: base,
     );
   }
 

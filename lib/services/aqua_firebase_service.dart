@@ -721,16 +721,21 @@ class AquaFirebaseService {
   }
 
   Stream<List<AquaChatMessage>> watchChatMessages({int limit = 60}) {
-    return _root
-        .child('chatbot/messages')
-        .orderByChild('createdAt')
-        .limitToLast(limit)
-        .onValue
-        .map((event) => AquaChatMessage.listFromFirebase(event.snapshot.value));
+    return _root.child('chatbot/messages').onValue.map((event) {
+      final messages = AquaChatMessage.listFromFirebase(event.snapshot.value);
+      if (messages.length <= limit) {
+        return messages;
+      }
+      return messages.sublist(messages.length - limit);
+    });
   }
 
   Future<void> saveChatMessage(AquaChatMessage message) {
     return _root.child('chatbot/messages').push().set(message.toFirebase());
+  }
+
+  Future<void> clearChatMessages() {
+    return _root.child('chatbot/messages').remove();
   }
 
   Future<void> setPumpState(PumpKind pump, bool isOn) {

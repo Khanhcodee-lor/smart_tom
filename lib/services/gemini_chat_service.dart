@@ -17,13 +17,24 @@ class GeminiChatException implements Exception {
 class GeminiChatService {
   GeminiChatService({http.Client? client}) : _client = client ?? http.Client();
 
-  static const _apiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static const _apiKeyFromEnvironment = String.fromEnvironment(
+    'GEMINI_API_KEY',
+  );
+  static const _fallbackApiKey = 'AIzaSyAf-EFNBzXX2DNL4oLph5ct6dRxsEM_ZRs';
   static const _model = String.fromEnvironment(
     'GEMINI_MODEL',
     defaultValue: 'gemini-3.5-flash',
   );
 
   final http.Client _client;
+
+  String get _apiKey {
+    final environmentKey = _apiKeyFromEnvironment.trim();
+    if (environmentKey.isNotEmpty) {
+      return environmentKey;
+    }
+    return _fallbackApiKey;
+  }
 
   bool get isConfigured => _apiKey.trim().isNotEmpty;
 
@@ -44,7 +55,7 @@ class GeminiChatService {
     final response = await _client
         .post(
           _endpoint,
-          headers: const {
+          headers: {
             'Content-Type': 'application/json',
             'x-goog-api-key': _apiKey,
           },
@@ -115,6 +126,7 @@ class GeminiChatService {
     return '''
 Bạn là Aqua AI, trợ lý tư vấn nuôi tôm và quản lý ao thủy sản cho ứng dụng AquaSmart.
 Trả lời bằng tiếng Việt, ngắn gọn, thân thiện, ưu tiên việc người nuôi có thể làm ngay.
+Không dùng tiêu đề Markdown kiểu ###. Nếu cần liệt kê, dùng danh sách ngắn 1., 2., 3. và tối đa 5 ý chính.
 Khi tư vấn bệnh, hóa chất, thuốc hoặc thay nước, hãy nhắc người dùng kiểm tra thực tế ao và hỏi kỹ sư/nhân viên thú y thủy sản nếu có dấu hiệu nghiêm trọng.
 
 Dữ liệu Firebase hiện tại của ao:
